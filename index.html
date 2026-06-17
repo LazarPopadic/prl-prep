@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PRL Prep</title>
+  <link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="topbar-mark">P</span>
+        <span>PRL Prep</span>
+        <span class="topbar-date" id="topbar-sub"></span>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-framework" class="ghost" title="The standard project framework you pitch to every researcher">Project framework</button>
+        <button id="btn-export" class="ghost" title="Download your statuses, notes and edits as a backup">Export</button>
+        <button id="btn-import" class="ghost" title="Restore from a backup file">Import</button>
+        <input type="file" id="import-file" accept=".json" hidden>
+      </div>
+    </header>
+
+    <div id="framework-banner" class="framework-banner" hidden></div>
+    <div id="imported-banner" class="note-banner imported-banner"></div>
+
+    <section class="stats" id="stats"></section>
+
+    <div class="prog-filters" id="filters"></div>
+
+    <main id="leads"></main>
+
+    <footer class="footer">
+      <p id="footer-note"></p>
+    </footer>
+  </div>
+
+  <script src="js/data.js?v=1"></script>
+  <script src="js/app.js?v=1"></script>
+</body>
+</html>
