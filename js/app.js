@@ -15,6 +15,7 @@
 
   let state = loadState();
   const expanded = new Set();
+  let panelOpen = false; // Filters panel collapsed by default
 
   // ------------------------------------------------------------ utilities
   const $ = (s, el = document) => el.querySelector(s);
@@ -104,48 +105,59 @@
   }
 
   // ------------------------------------------------------------ filters bar
+  // Visible always: sort + search + the Filters button. The dropdown filters and
+  // the two non-tile toggles live inside a collapsible panel.
   function renderFilters() {
     const f = state.filters || {};
     const labs = [...new Set(LEADS.map(l => l.lab))].sort();
     const areas = [...new Set(LEADS.flatMap(l => l.researchAreas || []))].sort();
     const opt = (v, sel) => `<option value="${esc(v)}" ${sel === v ? "selected" : ""}>${esc(v)}</option>`;
     const toggle = (key, label) => `<button class="toggle-btn ${f[key] ? "on" : ""}" data-toggle="${key}">${label}</button>`;
+    const activeCount = ["status", "lab", "area", "priority"].filter(k => f[k]).length + (f.notReplied ? 1 : 0) + (f.proposal ? 1 : 0);
 
     $("#filters").innerHTML = `
-      <select data-filter="status"><option value="">All statuses</option>${META.statuses.map(s => opt(s, f.status)).join("")}</select>
-      <select data-filter="lab"><option value="">All labs</option>${labs.map(l => opt(l, f.lab)).join("")}</select>
-      <select data-filter="area"><option value="">All research areas</option>${areas.map(a => opt(a, f.area)).join("")}</select>
-      <select data-filter="priority"><option value="">All priorities</option>${PRIORITIES.map(p => opt(p, f.priority)).join("")}</select>
-      <select data-filter="sort">
-        ${[["pinned", "Active first, then priority"], ["priority", "By priority"], ["strength", "By lead strength"], ["status", "By status"], ["updated", "By last updated"], ["name", "By name"]]
-          .map(([v, lbl]) => `<option value="${v}" ${(f.sort || "pinned") === v ? "selected" : ""}>${lbl}</option>`).join("")}
-      </select>
-      <input type="search" placeholder="Search name / lab / area…" data-filter="q" value="${esc(f.q || "")}">
-      ${toggle("activeOnly", "★ Active only")}
-      ${toggle("replied", "Has replied")}
-      ${toggle("notReplied", "Not replied")}
-      ${toggle("meeting", "Meeting needed")}
-      ${toggle("clarify", "Clarification needed")}
-      ${toggle("proposal", "Proposal possible")}
-      ${toggle("confirmed", "Confirmed")}
-    `;
+      <div class="filterbar-top">
+        <button id="filters-toggle" class="toggle-btn ${panelOpen ? "on" : ""}" aria-expanded="${panelOpen}">
+          Filters${activeCount ? ` <span class="filt-count">${activeCount}</span>` : ""} ${panelOpen ? "▴" : "▾"}
+        </button>
+        <select data-filter="sort">
+          ${[["pinned", "active first, then priority"], ["priority", "priority"], ["strength", "lead strength"], ["status", "status"], ["updated", "last updated"], ["name", "name"]]
+            .map(([v, lbl]) => `<option value="${v}" ${(f.sort || "pinned") === v ? "selected" : ""}>Sort — ${lbl}</option>`).join("")}
+        </select>
+        <input type="search" placeholder="Search name / lab / area…" data-filter="q" value="${esc(f.q || "")}">
+      </div>
+      <div class="filter-panel" ${panelOpen ? "" : "hidden"}>
+        <select data-filter="status"><option value="">All statuses</option>${META.statuses.map(s => opt(s, f.status)).join("")}</select>
+        <select data-filter="lab"><option value="">All labs</option>${labs.map(l => opt(l, f.lab)).join("")}</select>
+        <select data-filter="area"><option value="">All research areas</option>${areas.map(a => opt(a, f.area)).join("")}</select>
+        <select data-filter="priority"><option value="">All priorities</option>${PRIORITIES.map(p => opt(p, f.priority)).join("")}</select>
+        ${toggle("notReplied", "Not replied")}
+        ${toggle("proposal", "Proposal possible")}
+        <button id="filters-clear" class="ghost">Clear all</button>
+      </div>`;
   }
+
+  // tile (stat-card) quick filters
+  const TILE_PRED = {
+    active: l => !l.imported,
+    replied: l => hasReplied(eff(l).status),
+    meeting: l => meetingNeeded(eff(l).status),
+    clarify: l => clarificationNeeded(eff(l).status),
+    confirmed: l => confirmed(eff(l).status)
+  };
 
   function applyFilters(list) {
     const f = state.filters || {};
+    const tilePred = TILE_PRED[f.tile];
     let out = list.filter(l => {
       const e = eff(l);
-      if (f.activeOnly && l.imported) return false;
+      if (tilePred && !tilePred(l)) return false;
       if (f.status && e.status !== f.status) return false;
       if (f.lab && l.lab !== f.lab) return false;
       if (f.area && !(l.researchAreas || []).includes(f.area)) return false;
       if (f.priority && e.priority !== f.priority) return false;
-      if (f.replied && !hasReplied(e.status)) return false;
       if (f.notReplied && hasReplied(e.status)) return false;
-      if (f.meeting && !meetingNeeded(e.status)) return false;
-      if (f.clarify && !clarificationNeeded(e.status)) return false;
       if (f.proposal && !proposalPossible(e.status)) return false;
-      if (f.confirmed && !confirmed(e.status)) return false;
       if (f.q) {
         const q = f.q.toLowerCase();
         if (!(l.name + l.lab + l.institution + (l.researchAreas || []).join(" ") + (l.title || "")).toLowerCase().includes(q)) return false;
@@ -167,21 +179,23 @@
   }
 
   // ------------------------------------------------------------ stats
+  // Each tile is a one-click quick filter. data-tile maps to a predicate in
+  // applyFilters; "" (Total contacts) clears the tile filter.
   function renderStats() {
+    const f = state.filters || {};
+    const cnt = pred => LEADS.filter(l => pred(eff(l).status)).length;
     const active = LEADS.filter(l => !l.imported).length;
-    const replied = LEADS.filter(l => hasReplied(eff(l).status)).length;
-    const needMeeting = LEADS.filter(l => meetingNeeded(eff(l).status)).length;
-    const needClarify = LEADS.filter(l => clarificationNeeded(eff(l).status)).length;
-    const confirmedN = LEADS.filter(l => confirmed(eff(l).status)).length;
-    const stat = (label, value, cls = "") => `
-      <div class="card stat ${cls}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
+    const tile = (label, value, key, urgent) =>
+      `<div class="card stat tile ${urgent ? "urgent" : ""} ${(key && f.tile === key) ? "active" : ""}" data-tile="${key}" title="Click to show just these">
+         <div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
+    const needMeeting = cnt(meetingNeeded);
     $("#stats").innerHTML =
-      stat("Active conversations", active) +
-      stat("Total contacts", LEADS.length) +
-      stat("Have replied", replied) +
-      stat("Meeting to schedule", needMeeting, needMeeting ? "urgent" : "") +
-      stat("Awaiting your clarify", needClarify) +
-      stat("Confirmed", confirmedN);
+      tile("Active conversations", active, "active") +
+      tile("Total contacts", LEADS.length, "") +
+      tile("Have replied", cnt(hasReplied), "replied") +
+      tile("Meeting to schedule", needMeeting, "meeting", needMeeting > 0) +
+      tile("Awaiting your clarify", cnt(clarificationNeeded), "clarify") +
+      tile("Confirmed", cnt(confirmed), "confirmed");
   }
 
   // ------------------------------------------------------------ cards
@@ -284,13 +298,29 @@
       const y = window.scrollY; renderLeads(); window.scrollTo(0, y);
       return;
     }
+    // stat-tile quick filter (one at a time; click again or "Total" clears)
+    const tileEl = e.target.closest("[data-tile]");
+    if (tileEl) {
+      state.filters = state.filters || {};
+      const k = tileEl.dataset.tile;
+      state.filters.tile = (k && state.filters.tile === k) ? "" : k;
+      saveState(); const y = window.scrollY; renderAll(); window.scrollTo(0, y);
+      return;
+    }
+    // open/close the Filters panel
+    if (e.target.closest("#filters-toggle")) { panelOpen = !panelOpen; renderFilters(); return; }
+    // clear all filters (keeps sort)
+    if (e.target.closest("#filters-clear")) {
+      const sort = (state.filters || {}).sort;
+      state.filters = { sort };
+      saveState(); const y = window.scrollY; renderAll(); window.scrollTo(0, y);
+      return;
+    }
     const tog = e.target.closest("[data-toggle]");
     if (tog) {
       state.filters = state.filters || {};
       const k = tog.dataset.toggle;
       state.filters[k] = !state.filters[k];
-      if (k === "replied" && state.filters.replied) state.filters.notReplied = false;
-      if (k === "notReplied" && state.filters.notReplied) state.filters.replied = false;
       saveState(); const y = window.scrollY; renderAll(); window.scrollTo(0, y);
     }
   });
